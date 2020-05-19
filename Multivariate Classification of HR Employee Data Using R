@@ -1,0 +1,173 @@
+```{r}
+# Load libraries
+library(tidyverse)
+
+```{r}
+# Read the csv file
+# Store in hr variable
+hr <- "HR_comma_sep.csv" %>%
+read_csv()
+
+## Create salary_numeric: low = 1, medium = 2, else 3
+# Create left factor: 1 = yes, else no
+# Remove columns: -sales, -salary
+hr <- hr %>%
+mutate(salary_numeric = if_else(salary == 'low', 1,
+if_else(salary == 'medium', 2, 3)),
+left = if_else(left == 1, 'yes', 'no') %>% as.factor()) %>%
+select(-sales, -salary)
+
+# Explore result
+hr %>% glimpse()
+```
+### Exploring the data
+
+# Display the frequency table of left
+hr$left %>% table()
+
+# create a cols array containing
+# all columns names except left
+cols <- hr %>%
+select(-left) %>%
+names()
+
+# Explore result
+cols %>% print()
+```
+
+# Create violin plot function
+# Include quantile lines
+plot.left.v <- function(col, df){
+p1 <- df %>%
+ggplot(aes_string('left', col)) +
+geom_violin(draw_quantiles = c(0.25, 0.5, 0.75),
+fill = 'blue', alpha = 0.3, size = 1.0)
+
+# print result
+p1 %>% print()
+}
+
+# Call plot function for each value in cols
+cols %>% walk(plot.left.v, hr)
+```
+
+# Create dotplot function
+# Facet on left
+plot.left <- function(col, df, bins = 60){
+binwidth <- (max(df[, col]) - min(df[, col])) / bins
+p1 <- ggplot(df, aes_string(col)) +
+geom_dotplot(dotsize = 0.5, method = "histodot", binwidth = binwidth) +
+facet_wrap( ~ left)
+
+# print result
+p1 %>% print()
+}
+
+# Call plot function for each value in cols
+cols %>% walk(plot.left, hr)
+
+
+### Train the classifier
+
+# Remove duplicate rows
+print(str_c("Original row count: ", hr %>% nrow()))
+hr <- hr %>% distinct()
+print(str_c("Deduplicated row count: ", hr %>% nrow()))
+
+# Create normalize function with a mean of 0 and standard deviation of 1
+normalize <- function(x) (x - mean(x))/sd(x)
+
+# Apply normalize to all columns except left
+hr <- hr %>% mutate_at(vars(-left), normalize)
+
+# Explore result
+hr %>% glimpse()
+
+# Set seed for reproducability
+set.seed(1222)
+
+# Get 70% of the data for training
+# Store in hr.train
+hr.train <- hr %>%
+sample_frac(0.7)
+
+# Creat test set with the remaining rows
+# Store in hr.test
+hr.test <- hr %>%
+setdiff(hr.train)
+
+# Display row counts of hr.train and hr.test
+print(str_c("hr.train rows: ", nrow(hr.train)))
+print(str_c("hr.test rows: ", nrow(hr.test)))
+
+# Compare hr.train + hr.test to hr
+nrow(hr.test) + nrow(hr.train) == nrow(hr)
+
+# Create logistic binomial model of left ~ .
+hr.mod1 <- glm(left ~ . , data = hr.train,
+family=binomial())
+
+# View model summary
+hr.mod1 %>% summary()
+
+# Calculate the confidence interval for the model coefficients
+cat('Confidence intervals of model coefficients')
+hr.mod1 %>% confint()
+
+### Scoring the model
+
+# Predict results using model and test data
+hr.test$score <- predict(hr.mod1, newdata = hr.test)
+
+# Calculate binwidth for dotplot
+binwidth <- (max(hr.test[, 'score']) - min(hr.test[, 'score'])) / 60
+
+# Create dotplot using above binwidth for x = score
+# facet on left
+ggplot(hr.test, aes(x = score)) +
+geom_dotplot(dotsize = 0.5, method = "histodot", binwidth = binwidth) +
+facet_wrap( ~ left) +
+labs(title="Model Score by Left or Stay",
+x="Score count", y="Count")
+
+# Transform score using logistic function
+hr.test <- hr.test %>% mutate(score = exp(score)/(1 + exp(score)))
+
+# Calculate binwidth for dotplot
+binwidth = (max(hr.test[, 'score']) - min(hr.test[, 'score'])) / 60
+
+# Create dotplot using above binwidth for x = score
+# facet on left
+ggplot(hr.test, aes(x = score)) +
+geom_dotplot(dotsize = 0.5, method = "histodot", binwidth = binwidth) +
+facet_wrap( ~ left) +
+labs(title="Model Score by Left or Stay",
+x="Score count", y="Count")
+
+# Create score.pred factor: score > 0.5 then yes else no
+hr.test <- hr.test %>% mutate(score.pred = if_else(score > 0.5, "yes", "no") %>% as.factor())
+
+# Explore result
+hr.test %>% glimpse()
+
+### Evaluating the classifier
+
+# Create confusion matrix of hr.test$left and hr.test$score.pred
+caret::confusionMatrix(data = hr.test$score.pred,
+reference = hr.test$left,
+mode = "prec_recall")
+
+# Create a test.threshold fucntion that take a threshold and a data frame
+test.threshold <- function(thresh = 0.5, hr) {
+# Calculat the new prediction based on the threshold
+hr <- hr %>% mutate(score.pred = if_else(hr$score > thresh, 'yes', 'no') %>% as.factor())
+cat('For threshold of ', thresh, ' performance is: \n')
+print(caret::confusionMatrix(data = hr$score.pred, reference = hr$left, mode = "prec_recall"))
+cat('\n')
+}
+
+# Create vector of thresholds to try
+threshs = c(0.45, 0.40, 0.35, 0.30)
+# Call test.threshold function for each value of threshs
+threshs %>% walk(test.threshold, hr.test)
+```
