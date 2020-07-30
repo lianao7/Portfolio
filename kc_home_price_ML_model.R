@@ -192,4 +192,4 @@ price
 pred = predict(rf_model, newdata=to_predict)
 price = 10^(pred)
 pred
-price
+price;
